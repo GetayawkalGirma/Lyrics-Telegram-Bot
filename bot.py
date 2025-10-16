@@ -24,7 +24,7 @@ load_dotenv()
 
 # Bot configuration
 BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-API_BASE_URL = os.getenv('API_BASE_URL', 'http://localhost:8000')
+API_BASE_URL = os.getenv('API_BASE_URL', 'https://organisational-benoite-get-solutions-2877e0ac.koyeb.app/')
 
 if not BOT_TOKEN:
     raise ValueError("TELEGRAM_BOT_TOKEN environment variable is required")
@@ -175,35 +175,59 @@ Contact @your_username for support
             )
     
     async def handle_inline_query(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle inline queries for instant search - songs only with lyrics"""
+        """Handle inline queries for instant search - songs only with lyrics and pagination"""
         if not update.inline_query:
             return
             
         query = update.inline_query.query
+        offset = int(update.inline_query.offset or 0)  # Get current offset for pagination
         
         if not query or len(query) < 2:
             return
         
         try:
-            logger.info(f"Processing inline query: '{query}'")
-            # Perform search with limit
-            results = await self.api_client.search_prefix(query, limit=20)
-            logger.info(f"Search returned {len(results.data)} results")
+            logger.info(f"Processing inline query: '{query}' with offset: {offset}")
             
-            if not results.data:
-                return
+            # Check if we have cached results for this query
+            cache_key = f"search_{query}"
+            if not hasattr(self, '_search_cache'):
+                self._search_cache = {}
             
-            # Filter only songs (more than 1 slash = song)
-            songs = [result for result in results.data if result.title.count("/") > 1]
-            logger.info(f"Found {len(songs)} songs after filtering")
+            # If offset is 0, perform new search and cache results
+            if offset == 0 or cache_key not in self._search_cache:
+                logger.info(f"Performing new search for query: '{query}'")
+                # Perform search with higher limit to get more results for pagination
+                results = await self.api_client.search_prefix(query, limit=50)
+                logger.info(f"Search returned {len(results.data)} results")
+                
+                if not results.data:
+                    return
+                
+                # Filter only songs (more than 1 slash = song)
+                songs = [result for result in results.data if result.title.count("/") > 1]
+                logger.info(f"Found {len(songs)} songs after filtering")
+                
+                if not songs:
+                    logger.info("No songs found, returning empty results")
+                    return
+                
+                # Cache the songs list
+                self._search_cache[cache_key] = songs
+                logger.info(f"Cached {len(songs)} songs for query: '{query}'")
+            else:
+                # Use cached results
+                songs = self._search_cache[cache_key]
+                logger.info(f"Using cached results: {len(songs)} songs for query: '{query}'")
             
-            if not songs:
-                logger.info("No songs found, returning empty results")
-                return
+            # Calculate pagination
+            songs_per_page = 5
+            start_idx = offset
+            end_idx = start_idx + songs_per_page
+            songs_to_show = songs[start_idx:end_idx]
             
-            # Create inline results for songs only (limit to first 5 for performance)
+            # Create inline results for current page
             inline_results = []
-            for i, song in enumerate(songs[:5]):  # Limit to 5 results for performance
+            for i, song in enumerate(songs_to_show):
                 song_name = song.title.split("/")[-1]
                 artist_name = song.title.split("/")[0]
                 
@@ -236,7 +260,7 @@ Contact @your_username for support
                     
                     # Create inline result with actual lyrics
                     inline_result = InlineQueryResultArticle(
-                        id=str(i),
+                        id=f"{offset}_{i}",
                         title=f"🎵 {song_name}",
                         description=f"by {artist_name}",
                         input_message_content=InputTextMessageContent(
@@ -258,7 +282,7 @@ Contact @your_username for support
                     
                     # Fallback to showing command if lyrics fetch fails
                     inline_result = InlineQueryResultArticle(
-                        id=str(i),
+                        id=f"{offset}_{i}",
                         title=f"🎵 {song_name}",
                         description=f"by {artist_name}",
                         input_message_content=InputTextMessageContent(
@@ -271,9 +295,38 @@ Contact @your_username for support
                     )
                     inline_results.append(inline_result)
             
-            # Answer the inline query
-            logger.info(f"Returning {len(inline_results)} inline results")
-            await update.inline_query.answer(inline_results, cache_time=300)
+            # Add loading indicator only on first page to show there are more results
+            # On subsequent pages, we don't show loading indicator so users can see fresh content
+            if end_idx < len(songs) and offset == 0:
+                remaining_songs = len(songs) - end_idx
+                loading_result = InlineQueryResultArticle(
+                    id=f"loading_{offset}",
+                    title="⏳ Load More Songs",
+                    description=f"{remaining_songs} more songs available - scroll down",
+                    input_message_content=InputTextMessageContent(
+                        message_text=f"⏳ **Load More Songs**\n\n"
+                                   f"📊 {remaining_songs} more songs available\n"
+                                   f"🔄 Scroll down to load more results",
+                        parse_mode='Markdown'
+                    )
+                )
+                inline_results.append(loading_result)
+                logger.info(f"Added loading indicator: {remaining_songs} more songs available")
+            elif end_idx < len(songs) and offset > 0:
+                # On subsequent pages, just log that there are more songs but don't show indicator
+                remaining_songs = len(songs) - end_idx
+                logger.info(f"Page {offset//5 + 1}: {remaining_songs} more songs available (no loading indicator shown)")
+            
+            # Calculate next offset for pagination
+            next_offset = str(end_idx) if end_idx < len(songs) else None
+            
+            # Answer the inline query with pagination support
+            logger.info(f"Returning {len(inline_results)} inline results, next_offset: {next_offset}")
+            await update.inline_query.answer(
+                inline_results, 
+                cache_time=300,
+                next_offset=next_offset
+            )
             
         except Exception as e:
             logger.error(f"Inline query failed: {e}")

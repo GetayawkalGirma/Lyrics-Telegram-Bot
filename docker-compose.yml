@@ -1,0 +1,34 @@
+version: "3.8"
+
+services:
+  mezmur-bot:
+    build: .
+    container_name: mezmur-telegram-bot
+    restart: unless-stopped
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - API_BASE_URL=${API_BASE_URL:-http://host.docker.internal:8000}
+    volumes:
+      - ./logs:/app/logs # Mount logs directory
+    depends_on:
+      - mezmur-api
+    networks:
+      - mezmur-network
+
+  mezmur-api:
+    # This assumes your API is also containerized
+    # If not, remove this service and use host.docker.internal:8000
+    image: your-mezmur-api-image # Replace with your actual API image
+    container_name: mezmur-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    networks:
+      - mezmur-network
+
+networks:
+  mezmur-network:
+    driver: bridge
+
+volumes:
+  logs:
