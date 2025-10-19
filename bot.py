@@ -5,7 +5,7 @@ import os
 import asyncio
 import logging
 from dotenv import load_dotenv
-from telegram import Update, BotCommand, InlineQueryResultArticle, InputTextMessageContent
+from telegram import Update, BotCommand, InlineQueryResultArticle, InputTextMessageContent, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, InlineQueryHandler, filters, ContextTypes
 from utils.api_client import MezmurAPIClient
 from handlers.search import SearchHandler
@@ -15,7 +15,7 @@ from handlers.albums import AlbumsHandler
 # Configure logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+    level=logging.DEBUG
 )
 logger = logging.getLogger(__name__)
 
@@ -48,6 +48,9 @@ class MezmurBot:
         # Initialize application
         self.application = Application.builder().token(bot_token).build()
         
+        # User conversation states - tracks what each user is waiting for
+        self.user_states = {}
+        
         # Register handlers
         self._register_handlers()
     
@@ -72,7 +75,8 @@ class MezmurBot:
         self.application.add_handler(CommandHandler("album", self.albums_handler.album_command))
         self.application.add_handler(CommandHandler("artists", self.albums_handler.artists_command))
         
-        # Callback query handlers
+        # Callback query handlers - order matters! Put the most specific ones first
+        self.application.add_handler(CallbackQueryHandler(self.handle_button_callback, pattern="^(search_artist|search_album|search_song|inline_search|back_to_home)$"))
         self.application.add_handler(CallbackQueryHandler(self.search_handler.handle_callback_query))
         self.application.add_handler(CallbackQueryHandler(self.albums_handler.handle_callback_query))
         
@@ -89,34 +93,41 @@ class MezmurBot:
         welcome_message = """
 🎵 **Welcome to Mezmur Bot!** 🎵
 
-I can help you find and listen to Ethiopian music lyrics. Here's what I can do:
+I can help you find and listen to Ethiopian music lyrics. Choose what you'd like to do:
 
-🔍 **Search Commands:**
-• `/search <query>` - Fast search for titles starting with your query
-• `/search_full <query>` - Broader search that looks anywhere in content
+**Quick Actions:**
+Use the buttons below to get started quickly!
 
-🎵 **Lyrics Commands:**
-• `/lyrics <song_title>` - Get plain text lyrics
-• `/rich_lyrics <song_title>` - Get lyrics with HTML formatting
-• `/random_lyrics` - Get random lyrics
-
-👤 **Artist & Album Commands:**
-• `/artist <artist_name>` - Get albums by an artist
-• `/album <album_title>` - Get songs in an album
+**Manual Commands:**
+• `/help` - Show all available commands
 • `/artists` - List all available artists
-
-📖 **Help:**
-• `/help` - Show this help message
 
 **Examples:**
 • `/search samuel tesfa`
 • `/artist Samuel Tesfamichael`
 • `/lyrics Samuel Tesfamichael/Misale Yeleleh/Yekebere`
 
-Just type any of these commands to get started! 🚀
+Just click a button below or type any command to get started! 🚀
         """
         
-        await update.effective_message.reply_text(welcome_message, parse_mode='Markdown')
+        # Create inline keyboard with 4 buttons
+        keyboard = [
+            [
+                InlineKeyboardButton("👤 Search Artists", callback_data="search_artist"),
+                InlineKeyboardButton("💿 Browse Albums", callback_data="search_album")
+            ],
+            [
+                InlineKeyboardButton("🎵 Find Songs", callback_data="search_song"),
+                InlineKeyboardButton("🔍 Quick Search", callback_data="inline_search")
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.effective_message.reply_text(
+            welcome_message, 
+            parse_mode='Markdown',
+            reply_markup=reply_markup
+        )
     
     async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /help command"""
@@ -149,28 +160,227 @@ Contact @your_username for support
         
         await update.effective_message.reply_text(help_message, parse_mode='Markdown')
     
-    async def handle_text_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle regular text messages (non-commands)"""
-        if not update.effective_message:
+    async def handle_button_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle button callback queries from the welcome message"""
+        query = update.callback_query
+        if not query:
             return
             
-        message_text = (update.effective_message.text or "").lower()
+        await query.answer()
+        
+        data = query.data
+        if not data:
+            return
+        
+        print(f"DEBUG: Main menu button callback received: '{data}'")
+        
+        if data == "search_artist":
+            await self._handle_artist_search_request(query, context)
+        elif data == "search_album":
+            await self._handle_album_search_request(query, context)
+        elif data == "search_song":
+            await self._handle_song_search_request(query, context)
+        elif data == "inline_search":
+            await self._handle_inline_search_request(query, context)
+        elif data == "back_to_home":
+            await self._handle_back_to_home(query, context)
+    
+    async def _handle_artist_search_request(self, query, context: ContextTypes.DEFAULT_TYPE):
+        """Handle artist search button click"""
+        user_id = query.from_user.id
+        print(f"DEBUG: Artist search button clicked by user {user_id}")
+        
+        # Set user state to waiting for artist name
+        self.user_states[user_id] = 'waiting_for_artist'
+        print(f"DEBUG: Set user {user_id} state to: waiting_for_artist")
+        
+        message = """
+👤 **Search Artists** 👤
+
+Please type the artist name you want to search for.
+
+**Examples:**
+• Samuel Tesfamichael
+• Getayawkal & Birucktawit
+• Tesfaye Chala
+
+Just type the artist name and I'll show you their albums!
+        """
+        
+        await query.message.reply_text(message, parse_mode='Markdown')
+    
+    async def _handle_album_search_request(self, query, context: ContextTypes.DEFAULT_TYPE):
+        """Handle album search button click"""
+        user_id = query.from_user.id
+        
+        # Set user state to waiting for album name
+        self.user_states[user_id] = 'waiting_for_album'
+        
+        message = """
+💿 **Browse Albums** 💿
+
+Please type the album name you want to search for.
+
+**Examples:**
+• Samuel Tesfamichael/Misale Yeleleh
+• Getayawkal & Birucktawit/Enkuan Des Alachehu
+• Tesfaye Chala/Yebelay Neh Gieta
+
+Just type the album name and I'll show you the songs in that album!
+        """
+        
+        await query.message.reply_text(message, parse_mode='Markdown')
+    
+    async def _handle_song_search_request(self, query, context: ContextTypes.DEFAULT_TYPE):
+        """Handle song search button click"""
+        user_id = query.from_user.id
+        
+        # Set user state to waiting for song search
+        self.user_states[user_id] = 'waiting_for_song_search'
+        
+        message = """
+🎵 **Find Songs** 🎵
+
+Please type the song name or search query.
+
+**Examples:**
+• Yekebere
+• Misale Yeleleh
+• Samuel Tesfamichael
+
+Just type your search query and I'll find matching songs!
+        """
+        
+        await query.message.reply_text(message, parse_mode='Markdown')
+    
+    async def _handle_inline_search_request(self, query, context: ContextTypes.DEFAULT_TYPE):
+        """Handle inline search button click"""
+        message = """
+🔍 **Quick Search Mode** 🔍
+
+To use quick search, type `@mezmurlybot` in any chat, then type your search query.
+
+**How to use:**
+1. Go to any Telegram chat
+2. Type `@mezmurlybot` followed by your search
+3. Select a song from the results
+4. Get instant lyrics!
+
+**Example:**
+`@mezmurlybot samuel tesfa`
+
+This will show you instant search results with lyrics!
+        """
+        
+        await query.message.reply_text(message, parse_mode='Markdown')
+    
+    async def _handle_back_to_home(self, query, context: ContextTypes.DEFAULT_TYPE):
+        """Handle back to home button click"""
+        user_id = query.from_user.id
+        
+        # Clear any existing user state
+        if user_id in self.user_states:
+            del self.user_states[user_id]
+        
+        # Send the welcome message again
+        welcome_message = """
+🎵 **Welcome to Mezmur Bot!** 🎵
+
+I can help you find and listen to Ethiopian music lyrics. Choose what you'd like to do:
+
+**Quick Actions:**
+Use the buttons below to get started quickly!
+
+**Manual Commands:**
+• `/help` - Show all available commands
+• `/artists` - List all available artists
+
+**Examples:**
+• `/search samuel tesfa`
+• `/artist Samuel Tesfamichael`
+• `/lyrics Samuel Tesfamichael/Misale Yeleleh/Yekebere`
+
+Just click a button below or type any command to get started! 🚀
+        """
+        
+        # Create inline keyboard with 4 buttons
+        keyboard = [
+            [
+                InlineKeyboardButton("👤 Search Artists", callback_data="search_artist"),
+                InlineKeyboardButton("💿 Browse Albums", callback_data="search_album")
+            ],
+            [
+                InlineKeyboardButton("🎵 Find Songs", callback_data="search_song"),
+                InlineKeyboardButton("🔍 Quick Search", callback_data="inline_search")
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.message.reply_text(
+            welcome_message, 
+            parse_mode='Markdown',
+            reply_markup=reply_markup
+        )
+    
+    async def handle_text_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle regular text messages (non-commands)"""
+        if not update.effective_message or not update.effective_user:
+            return
+        
+        user_id = update.effective_user.id
+        message_text = update.effective_message.text or ""
+        
+        print(f"DEBUG: Received text message from user {user_id}: '{message_text}'")
+        print(f"DEBUG: Current user states: {self.user_states}")
+        
+        # Check if user is in a conversation state
+        if user_id in self.user_states:
+            state = self.user_states[user_id]
+            print(f"DEBUG: User {user_id} is in state: {state}")
+            
+            # Clear the user state first
+            del self.user_states[user_id]
+            
+            # Process based on conversation state
+            if state == 'waiting_for_artist':
+                print(f"DEBUG: Processing artist search for: {message_text}")
+                # Simulate /artist command
+                context.args = [message_text]
+                await self.albums_handler.artist_command(update, context)
+                return
+                
+            elif state == 'waiting_for_album':
+                print(f"DEBUG: Processing album search for: {message_text}")
+                # Simulate /album command
+                context.args = [message_text]
+                await self.albums_handler.album_command(update, context)
+                return
+                
+            elif state == 'waiting_for_song_search':
+                print(f"DEBUG: Processing song search for: {message_text}")
+                # Simulate /search command
+                context.args = [message_text]
+                await self.search_handler.search_command(update, context)
+                return
+        
+        # Default behavior for users not in conversation state
+        message_text_lower = message_text.lower()
         
         # Simple keyword detection for common searches
-        if any(keyword in message_text for keyword in ['samuel', 'tesfamichael', 'misale', 'yeleleh']):
+        if any(keyword in message_text_lower for keyword in ['samuel', 'tesfamichael', 'misale', 'yeleleh']):
             await update.effective_message.reply_text(
                 "🔍 I detected you might be looking for music!\n\n"
                 "Try these commands:\n"
                 "• `/search samuel tesfa` - Search for Samuel Tesfamichael\n"
                 "• `/search misale` - Search for Misale Yeleleh\n"
                 "• `/artist Samuel Tesfamichael` - Get his albums\n\n"
-                "Type `/help` for more commands!",
+                "Or click `/start` to use the interactive buttons!",
                 parse_mode='Markdown'
             )
         else:
             await update.effective_message.reply_text(
                 "👋 Hi! I'm Mezmur Bot, your Ethiopian music assistant.\n\n"
-                "Type `/start` to see what I can do, or `/help` for command help!",
+                "Type `/start` to see interactive buttons, or `/help` for command help!",
                 parse_mode='Markdown'
             )
     
@@ -197,7 +407,7 @@ Contact @your_username for support
             if offset == 0 or cache_key not in self._search_cache:
                 logger.info(f"Performing new search for query: '{query}'")
                 # Perform search with higher limit to get more results for pagination
-                results = await self.api_client.search_prefix(query, limit=50)
+                results = await self.api_client.search_prefix(query, limit=80)
                 logger.info(f"Search returned {len(results.data)} results")
                 
                 if not results.data:

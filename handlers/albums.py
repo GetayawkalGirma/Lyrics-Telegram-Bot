@@ -96,10 +96,21 @@ class AlbumsHandler:
             albums_result = await self.api_client.get_artist_albums(artist_name, limit=20)
             
             if not albums_result.data:
+                # Create keyboard with retry and home options
+                keyboard = [
+                    [
+                        InlineKeyboardButton("🔄 Try Another Artist", callback_data="search_artist"),
+                        InlineKeyboardButton("🏠 Back to Home", callback_data="back_to_home")
+                    ]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
                 await update.effective_message.reply_text(
                     f"❌ No albums found for '{artist_name}'\n\n"
-                    "Please check the artist name and try again.",
-                    parse_mode='Markdown'
+                    "Please check the artist name and try again.\n\n"
+                    "You can try searching for another artist or go back to the main menu.",
+                    parse_mode='Markdown',
+                    reply_markup=reply_markup
                 )
                 return
             
@@ -122,6 +133,9 @@ class AlbumsHandler:
             
             if len(albums_result.data) > 5:
                 keyboard.append([InlineKeyboardButton("📄 Show More Albums", callback_data=f"more_albums:{artist_name}")])
+            
+            # Add back to home button
+            keyboard.append([InlineKeyboardButton("🏠 Back to Home", callback_data="back_to_home")])
             
             reply_markup = InlineKeyboardMarkup(keyboard)
             
@@ -150,10 +164,21 @@ class AlbumsHandler:
             songs_result = await self.api_client.get_album_songs(album_title, limit=20)
             
             if not songs_result.data:
+                # Create keyboard with retry and home options
+                keyboard = [
+                    [
+                        InlineKeyboardButton("🔄 Try Another Album", callback_data="search_album"),
+                        InlineKeyboardButton("🏠 Back to Home", callback_data="back_to_home")
+                    ]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
                 await update.effective_message.reply_text(
                     f"❌ No songs found for '{album_title}'\n\n"
-                    "Please check the album title and try again.",
-                    parse_mode='Markdown'
+                    "Please check the album title and try again.\n\n"
+                    "You can try searching for another album or go back to the main menu.",
+                    parse_mode='Markdown',
+                    reply_markup=reply_markup
                 )
                 return
             
@@ -177,6 +202,9 @@ class AlbumsHandler:
             
             if len(songs_result.data) > 5:
                 keyboard.append([InlineKeyboardButton("📄 Show More Songs", callback_data=f"more_songs:{album_title}")])
+            
+            # Add back to home button
+            keyboard.append([InlineKeyboardButton("🏠 Back to Home", callback_data="back_to_home")])
             
             reply_markup = InlineKeyboardMarkup(keyboard)
             
@@ -223,14 +251,24 @@ class AlbumsHandler:
     async def _show_album_songs(self, query, context: ContextTypes.DEFAULT_TYPE, album_title: str):
         """Show songs in an album"""
         try:
-            await context.bot.send_chat_action(chat_id=query.message.chat_id, action="typing")
+            await context.bot.send_chat_action(chat_id=query.message.chat_id, action="album songs")
             
-            songs_result = await self.api_client.get_album_songs(album_title, limit=10)
+            songs_result = await self.api_client.get_album_songs(album_title, limit=15)
             
             if not songs_result.data:
+                # Create keyboard with retry and home options
+                keyboard = [
+                    [
+                        InlineKeyboardButton("🔄 Try Another Album", callback_data="search_album"),
+                        InlineKeyboardButton("🏠 Back to Home", callback_data="back_to_home")
+                    ]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
                 await query.edit_message_text(
                     f"💿 **{album_title}**\n\nNo songs found.",
-                    parse_mode='Markdown'
+                    parse_mode='Markdown',
+                    reply_markup=reply_markup
                 )
                 return
             
@@ -244,7 +282,27 @@ class AlbumsHandler:
             if songs_result.has_next:
                 songs_text += f"\n📄 Showing {len(songs_result.data)} of {songs_result.total} songs"
             
-            await query.edit_message_text(songs_text, parse_mode='Markdown')
+            # Create inline keyboard for song selection
+            keyboard = []
+            for song in songs_result.data[:5]:  # Show first 5 songs
+                song_name = song.title.split("/")[-1] if "/" in song.title else song.title
+                button_text = f"🎵 {song_name}"
+                callback_data = f"lyrics:{song.title}"  # Store FULL path for lyrics
+                keyboard.append([InlineKeyboardButton(button_text, callback_data=callback_data)])
+            
+            if len(songs_result.data) > 5:
+                keyboard.append([InlineKeyboardButton("📄 Show More Songs", callback_data=f"more_songs:{album_title}")])
+            
+            # Add back to home button
+            keyboard.append([InlineKeyboardButton("🏠 Back to Home", callback_data="back_to_home")])
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.edit_message_text(
+                songs_text,
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
         
         except Exception as e:
             await query.edit_message_text(

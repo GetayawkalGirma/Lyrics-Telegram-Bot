@@ -80,7 +80,7 @@ class MezmurAPIClient:
             raise Exception(f"Health check failed: {str(e)}")
     
     # Search methods
-    async def search_prefix(self, query: str, page: int = 1, limit: int = 10, continue_token: str = None) -> PaginatedResponse:
+    async def search_prefix(self, query: str, page: int = 1, limit: int = 10, continue_token: Any = None) -> PaginatedResponse:
         """Prefix search - fast search for titles starting with query"""
         params = {
             "q": query,
@@ -119,7 +119,7 @@ class MezmurAPIClient:
         except Exception as e:
             raise Exception(f"Prefix search failed: {str(e)}")
     
-    async def search_full(self, query: str, page: int = 1, limit: int = 10, continue_token: str = None) -> PaginatedResponse:
+    async def search_full(self, query: str, page: int = 1, limit: int = 10, continue_token: Any = None) -> PaginatedResponse:
         """Full text search - searches anywhere in content"""
         params = {
             "q": query,
@@ -159,7 +159,7 @@ class MezmurAPIClient:
             raise Exception(f"Full search failed: {str(e)}")
     
     # Artist methods
-    async def get_artists(self, page: int = 1, limit: int = 20, continue_token: str = None) -> PaginatedResponse:
+    async def get_artists(self, page: int = 1, limit: int = 20, continue_token: Any = None) -> PaginatedResponse:
         """Get all artists with pagination"""
         params = {
             "page": page,
@@ -195,7 +195,7 @@ class MezmurAPIClient:
         except Exception as e:
             raise Exception(f"Get artists failed: {str(e)}")
     
-    async def get_artist_albums(self, artist_name: str, page: int = 1, limit: int = 20, continue_token: str = None) -> PaginatedResponse:
+    async def get_artist_albums(self, artist_name: str, page: int = 1, limit: int = 20, continue_token: Optional[Any] = None) -> PaginatedResponse:
         """Get albums by a specific artist"""
         params = {
             "page": page,
