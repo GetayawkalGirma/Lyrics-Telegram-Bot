@@ -209,25 +209,59 @@ class SearchHandler:
             songs_result = await self.api_client.get_album_songs(album_title, limit=10)
             
             if not songs_result.data:
+                                # Create keyboard with retry and home options
+                keyboard = [
+                    [
+                        InlineKeyboardButton("🔄 Try Another Artist", callback_data="search_artist"),
+                        InlineKeyboardButton("🏠 Back to Home", callback_data="back_to_home")
+                    ]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
                 await query.edit_message_text(
                     f"💿 **{album_title}**\n\n"
                     "No songs found for this album.",
-                    parse_mode='Markdown'
+                    parse_mode='Markdown',
+                    reply_markup=reply_markup
                 )
                 return
+                
             
             # Format songs
-            songs_text = "🎵 **Songs:**\n"
-            for song in songs_result.data:
+            album_name = album_title.split("/")[-1] if "/" in album_title else album_title
+            songs_text = f"💿 **{album_name}**\n\n🎵 **Songs:**\n\n"
+            for i, song in enumerate(songs_result.data, 1):
                 song_name = song.title.split("/")[-1] if "/" in song.title else song.title
-                songs_text += f"• {song_name}\n"
-            
-            message = f"💿 **{album_title}**\n\n{songs_text}"
+                songs_text += f"{i}. {song_name}\n"
             
             if songs_result.has_next:
-                message += f"\n\n📄 Showing {len(songs_result.data)} of {songs_result.total} songs"
+                songs_text += f"\n📄 Showing {len(songs_result.data)} of {songs_result.total} songs"
             
-            await query.edit_message_text(message, parse_mode='Markdown')
+            # Create inline keyboard for song selection
+            keyboard = []
+            for song in songs_result.data[:5]:  # Show first 5 songs
+                song_name = song.title.split("/")[-1] if "/" in song.title else song.title
+                button_text = f"🎵 {song_name}"
+                
+                # Construct full path: album_title/song_name
+                full_song_path = f"{album_title}/{song_name}"
+                callback_data = f"lyrics:{full_song_path}"
+                
+                print(f"DEBUG: Song button created - Song name: '{song_name}', Album: '{album_title}', Full path: '{full_song_path}', Callback: '{callback_data}'")
+                keyboard.append([InlineKeyboardButton(button_text, callback_data=callback_data)])
+            
+            if len(songs_result.data) > 5:
+                keyboard.append([InlineKeyboardButton("📄 Show More Songs", callback_data=f"more_songs:{album_title}")])
+            
+            # Add back to home button
+            keyboard.append([InlineKeyboardButton("🏠 Back to Home", callback_data="back_to_home")])
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.edit_message_text(
+                songs_text,
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
         
         except Exception as e:
             await query.edit_message_text(
@@ -240,45 +274,61 @@ class SearchHandler:
         try:
             await context.bot.send_chat_action(chat_id=query.message.chat_id, action="typing")
             
-            # Get rich lyrics
-            lyrics = await self.api_client.get_rich_lyrics(song_title)
+            print(f"DEBUG: Lyrics handler called with song_title: '{song_title}'")
             
-            # Extract song name from title
-            song_name = lyrics.title
+            # Get regular lyrics
+            lyrics_data = await self.api_client.get_lyrics(song_title)
+            
+            # Extract song info from response
+            song_name = lyrics_data.get("title", song_title.split("/")[-1])
+            artist = lyrics_data.get("artist", "")
+            album = lyrics_data.get("album", "")
+            lyrics_text = lyrics_data.get("lyrics", "No lyrics available")
             
             # Create message with lyrics info
             message = f"🎵 **{song_name}**\n"
-            if lyrics.artist:
-                message += f"👤 by {lyrics.artist}\n"
-            if lyrics.album:
-                message += f"💿 from {lyrics.album}\n"
+            if artist:
+                message += f"👤 by {artist}\n"
+            if album:
+                message += f"💿 from {album}\n"
             message += "\n" + "="*30 + "\n\n"
             
-            # Add HTML content (Telegram supports basic HTML)
-            message += lyrics.html_content
+            # Add lyrics text
+            message += lyrics_text
             
             # Telegram has message length limits, so we might need to split
             if len(message) > 4000:
                 # Send basic info first
                 basic_info = f"🎵 **{song_name}**\n"
-                if lyrics.artist:
-                    basic_info += f"👤 by {lyrics.artist}\n"
-                if lyrics.album:
-                    basic_info += f"💿 from {lyrics.album}\n"
+                if artist:
+                    basic_info += f"👤 by {artist}\n"
+                if album:
+                    basic_info += f"💿 from {album}\n"
                 
                 await query.edit_message_text(basic_info, parse_mode='Markdown')
+                
+
                 
                 # Send lyrics in a separate message
                 await context.bot.send_message(
                     chat_id=query.message.chat_id,
-                    text=lyrics.html_content,
-                    parse_mode='HTML'
+                    text=lyrics_text,
+                    parse_mode='Markdown',
+                    reply_markup=reply_markup
                 )
             else:
                 await query.edit_message_text(message, parse_mode='Markdown')
         
         except Exception as e:
+            keyboard = [
+                [
+                    InlineKeyboardButton("🔄 Try Another Song", callback_data="search_song"),
+                    InlineKeyboardButton("🏠 Back to Home", callback_data="back_to_home")
+                ]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
             await query.edit_message_text(
                 f"❌ Failed to get lyrics: {str(e)}",
-                parse_mode='Markdown'
+                parse_mode='Markdown',
+                reply_markup=reply_markup
             )

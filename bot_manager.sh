@@ -61,6 +61,9 @@ case "$1" in
         echo "Starting bot..."
         source venv/bin/activate
         
+        # Set API URL to your deployed service
+        export API_BASE_URL="https://organisational-benoite-get-solutions-2877e0ac.koyeb.app"
+        
         # Start bot in background and save PID
         nohup python "$BOT_SCRIPT" > bot.log 2>&1 &
         bot_pid=$!
@@ -114,6 +117,10 @@ case "$1" in
         
         echo "Starting bot..."
         source venv/bin/activate
+        
+        # Set API URL to your deployed service
+        export API_BASE_URL="https://organisational-benoite-get-solutions-2877e0ac.koyeb.app"
+        
         nohup python "$BOT_SCRIPT" > bot.log 2>&1 &
  bot_pid=$!
         echo "$bot_pid" > "$BOT_PID_FILE"
